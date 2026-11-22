@@ -8,6 +8,14 @@ struct Instance: Codable, Identifiable, Hashable {
     let gameVersion: String
     let loaderVersion: String
     var mods: [String: String] = [:] // Modrinth-Projekt-ID → Dateiname in mods/
+    var extras: [String: String]? // Projekt-ID → „resourcepacks/x.zip“ bzw. „shaderpacks/x.zip“ (optional: ältere instance.json haben es nicht)
+
+    func has(_ projectId: String) -> Bool { mods[projectId] != nil || extras?[projectId] != nil }
+
+    /// Projekt-ID zu einer Datei im Ordner einer Inhaltsart.
+    func projectId(for file: String, _ kind: Kind) -> String? {
+        kind == .mod ? mods.first { $0.value == file }?.key : extras?.first { $0.value == "\(kind.folder)/\(file)" }?.key
+    }
 }
 
 /// Wird bei jeder neuen Instanz automatisch installiert (alles Fabric, Client-seitig).
@@ -81,6 +89,8 @@ private let fm = FileManager.default
     var alert: String?
     var update: Updater.Release?
     var launcherInstalled = Store.detectLauncher()
+    var profilesReady = Store.detectProfiles()
+    var projectCache: [String: Project] = [:] // Namen und Icons installierter Inhalte, damit Listen nicht flackern
 
     init() { load() }
 
@@ -155,21 +165,68 @@ private let fm = FileManager.default
         load()
     }
 
-    func modFiles(_ inst: Instance) -> [String] {
-        let files = (try? fm.contentsOfDirectory(atPath: dir(inst).appending(path: "mods").path)) ?? []
-        return files.filter { $0.hasSuffix(".jar") || $0.hasSuffix(".jar.disabled") }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    func files(_ inst: Instance, _ kind: Kind) -> [String] {
+        let all = (try? fm.contentsOfDirectory(atPath: dir(inst).appending(path: kind.folder).path)) ?? []
+        return all.filter { !$0.hasPrefix(".") && (kind != .mod || $0.hasSuffix(".jar") || $0.hasSuffix(".jar.disabled")) }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
-    func removeMod(_ file: String, from inst: Instance) {
+    func removeFile(_ file: String, kind: Kind, from inst: Instance) {
         var inst = inst
         do {
-            try fm.removeItem(at: dir(inst).appending(path: "mods/\(file)"))
-            inst.mods = inst.mods.filter { $0.value != file }
+            try fm.removeItem(at: dir(inst).appending(path: "\(kind.folder)/\(file)"))
+            if kind == .mod { inst.mods = inst.mods.filter { $0.value != file } }
+            inst.extras = inst.extras?.filter { $0.value != "\(kind.folder)/\(file)" }
             try save(inst)
         } catch { alert = error.localizedDescription }
     }
 
-    func play() {
+    /// Fabric lädt keine Dateien mit Endung .disabled – so lässt sich ein Mod ausschalten, ohne ihn zu löschen.
+    func setEnabled(_ file: String, _ on: Bool, in inst: Instance) {
+        guard on == file.hasSuffix(".disabled") else { return }
+        var inst = inst
+        let mods = dir(inst).appending(path: "mods")
+        let newName = on ? String(file.dropLast(".disabled".count)) : file + ".disabled"
+        do {
+            try fm.moveItem(at: mods.appending(path: file), to: mods.appending(path: newName))
+            if let id = inst.projectId(for: file, .mod) { inst.mods[id] = newName }
+            try save(inst)
+        } catch { alert = error.localizedDescription }
+    }
+
+    func installProject(_ project: String, kind: Kind, into inst: inout Instance) async throws {
+        if kind == .mod { return try await installMod(project, into: &inst) }
+        guard let v = try await Modrinth.versions(project, loader: kind.loader, gameVersion: inst.gameVersion).first,
+              let file = v.files.first(where: \.primary) ?? v.files.first else {
+            throw QuarryError.incompatible(project, inst.gameVersion)
+        }
+        if inst.has(v.projectId) { return }
+        let dest = try Paths.safeDestination(base: dir(inst).appending(path: kind.folder), path: file.filename)
+        try await download(file.url, sha1: file.hashes["sha1"], to: dest)
+        inst.extras = (inst.extras ?? [:]).merging([v.projectId: "\(kind.folder)/\(file.filename)"]) { $1 }
+        try save(inst)
+    }
+
+    static func detectProfiles() -> Bool {
+        fm.fileExists(atPath: Paths.minecraft.appending(path: "launcher_profiles.json").path)
+    }
+
+    /// Nach dem Zurückwechseln in Quarry: Hat der Nutzer inzwischen den Launcher installiert oder sich angemeldet?
+    func refreshSystemState() {
+        launcherInstalled = Self.detectLauncher()
+        profilesReady = Self.detectProfiles()
+    }
+
+    /// Öffnet den Launcher; die Instanz wird zuletzt benutzt markiert, damit sie dort oben steht.
+    func play(_ inst: Instance? = nil) {
+        if let inst {
+            let now = ISO8601DateFormatter().string(from: .now)
+            try? editProfiles { profiles in
+                guard var p = profiles[inst.id] as? [String: Any] else { return }
+                p["lastUsed"] = now
+                profiles[inst.id] = p
+            }
+        }
         let ws = NSWorkspace.shared
         if let app = ws.urlForApplication(withBundleIdentifier: "com.mojang.minecraftlauncher") {
             ws.openApplication(at: app, configuration: .init())
@@ -196,7 +253,7 @@ private let fm = FileManager.default
         var inst = inst
         let modsDir = dir(inst).appending(path: "mods")
         var byHash: [String: String] = [:] // sha1 → Dateiname
-        for f in modFiles(inst) where f.hasSuffix(".jar") {
+        for f in files(inst, .mod) where f.hasSuffix(".jar") {
             byHash[sha1Hex(try Data(contentsOf: modsDir.appending(path: f)))] = f
         }
         guard !byHash.isEmpty else { alert = "Keine Mods zum Aktualisieren."; return }

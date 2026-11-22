@@ -8,7 +8,45 @@ struct Hit: Decodable, Identifiable, Hashable {
     let iconUrl: String?
     let downloads: Int
     let author: String
+    let categories: [String]
     var id: String { projectId }
+}
+
+struct Project: Decodable {
+    let id: String
+    let slug: String
+    let title: String
+    let description: String
+    let iconUrl: String?
+}
+
+/// Die vier Inhaltsarten von Modrinth, die Quarry installieren kann.
+enum Kind: String, CaseIterable, Identifiable, Hashable {
+    case mod, modpack, resourcepack, shader
+    var id: String { rawValue }
+
+    var title: String {
+        switch self { case .mod: "Mods"; case .modpack: "Modpacks"; case .resourcepack: "Ressourcenpakete"; case .shader: "Shader" }
+    }
+    var symbol: String {
+        switch self { case .mod: "puzzlepiece.extension"; case .modpack: "shippingbox"; case .resourcepack: "paintpalette"; case .shader: "sun.max" }
+    }
+    var explanation: String {
+        switch self {
+        case .mod: "Mods fügen neue Inhalte hinzu oder machen das Spiel schneller. Sie landen in einer deiner Instanzen."
+        case .modpack: "Fertige Sammlungen aus vielen Mods. Jedes Modpack wird als eigene neue Instanz installiert."
+        case .resourcepack: "Ändern Texturen, Sounds und Schrift. Im Spiel aktivieren: Optionen → Ressourcenpakete."
+        case .shader: "Echtes Licht, Schatten und Wasser. Im Spiel aktivieren: Optionen → Grafik → Shader-Pakete."
+        }
+    }
+    /// Modrinth-Loader für Versionen dieser Art.
+    var loader: String {
+        switch self { case .mod, .modpack: "fabric"; case .resourcepack: "minecraft"; case .shader: "iris" }
+    }
+    /// Unterordner der Instanz.
+    var folder: String {
+        switch self { case .mod: "mods"; case .modpack: ""; case .resourcepack: "resourcepacks"; case .shader: "shaderpacks" }
+    }
 }
 
 struct ModVersion: Decodable {
@@ -36,7 +74,7 @@ enum QuarryError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .http(let url): "Server antwortet nicht richtig: \(url)"
-        case .noLauncher: "Minecraft Launcher ist noch nicht eingerichtet. Installiere ihn über Quarry (unten links) und öffne ihn einmal zum Anmelden."
+        case .noLauncher: "Minecraft Launcher ist noch nicht eingerichtet. Installiere ihn auf der Übersicht in Quarry und öffne ihn einmal zum Anmelden."
         case .noUpdateServer: "Für diese Quarry-Version ist kein Update-Server eingerichtet."
         case .noFabric(let v): "Fabric gibt es (noch) nicht für Minecraft \(v)."
         case .incompatible(let p, let v): "„\(p)“ gibt es nicht für Fabric \(v)."
@@ -80,19 +118,24 @@ enum Modrinth {
         return try decoder.decode(T.self, from: try await fetch(c.url!))
     }
 
-    static func search(_ text: String, type: String, gameVersion: String?) async throws -> [Hit] {
+    static func search(_ text: String, kind: Kind, gameVersion: String?) async throws -> [Hit] {
         struct Result: Decodable { let hits: [Hit] }
-        var facets = [["project_type:\(type)"], ["categories:fabric"]]
+        var facets = [["project_type:\(kind.rawValue)"]]
+        if kind != .resourcepack { facets.append(["categories:\(kind.loader)"]) }
         if let gameVersion { facets.append(["versions:\(gameVersion)"]) }
         let r: Result = try await get("search", ["query": text, "facets": facets, "limit": "40"])
         return r.hits
     }
 
     /// Neueste Versionen zuerst (so liefert Modrinth sie).
-    static func versions(_ project: String, gameVersion: String?) async throws -> [ModVersion] {
-        var q: [String: Any] = ["loaders": ["fabric"]]
+    static func versions(_ project: String, loader: String = "fabric", gameVersion: String?) async throws -> [ModVersion] {
+        var q: [String: Any] = ["loaders": [loader]]
         if let gameVersion { q["game_versions"] = [gameVersion] }
         return try await get("project/\(project)/version", q)
+    }
+
+    static func projects(_ ids: [String]) async throws -> [Project] {
+        ids.isEmpty ? [] : try await get("projects", ["ids": ids])
     }
 
     static func releaseVersions() async throws -> [String] {
