@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 
 /// Selbst-Update über GitHub Releases. Das Repo („besitzer/quarry“) setzt build-app.sh in die Info.plist.
@@ -13,6 +14,7 @@ enum Updater {
     }
 
     static let repo = Bundle.main.object(forInfoDictionaryKey: "QuarryUpdateRepo") as? String
+    static let publicKey = Bundle.main.object(forInfoDictionaryKey: "QuarryUpdateKey") as? String
     static let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
 
     static func isNewer(_ tag: String, than current: String) -> Bool {
@@ -29,14 +31,21 @@ enum Updater {
 
     /// Lädt Quarry.zip, tauscht das App-Bundle nach dem Beenden aus und startet neu.
     static func install(_ r: Release) async throws {
-        guard let asset = r.assets.first(where: { $0.name == "Quarry.zip" }),
-              asset.browserDownloadUrl.scheme == "https", asset.browserDownloadUrl.host == "github.com" else {
+        let fromGitHub = { (a: Release.Asset) in a.browserDownloadUrl.scheme == "https" && a.browserDownloadUrl.host == "github.com" }
+        guard let asset = r.assets.first(where: { $0.name == "Quarry.zip" }), fromGitHub(asset),
+              let sigAsset = r.assets.first(where: { $0.name == "Quarry.zip.sig" }), fromGitHub(sigAsset),
+              let keyText = publicKey, let keyData = Data(base64Encoded: keyText),
+              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: keyData) else {
             throw QuarryError.badFile("Update-Paket")
         }
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory.appending(path: "quarry-update-\(UUID().uuidString)")
         let (zip, resp) = try await URLSession.shared.download(from: asset.browserDownloadUrl)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw QuarryError.http(asset.browserDownloadUrl.absoluteString) }
+        // Nur Updates annehmen, die mit dem privaten Release-Schlüssel signiert sind – schützt auch bei gekapertem GitHub-Konto.
+        let sigText = String(decoding: try await Modrinth.fetch(sigAsset.browserDownloadUrl), as: UTF8.self)
+        guard let sig = Data(base64Encoded: sigText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              key.isValidSignature(sig, for: try Data(contentsOf: zip)) else { throw QuarryError.badFile("Update-Signatur") }
         try runTool("/usr/bin/ditto", ["-x", "-k", zip.path, tmp.path])
         let newApp = tmp.appending(path: "Quarry.app")
         // Nur ein echtes, unbeschädigtes Quarry-Bundle einsetzen.

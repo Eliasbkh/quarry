@@ -31,3 +31,21 @@ func `update is offered only for newer versions`(tag: String, current: String, n
 @Test func `sha1 matches the known value`() {
     #expect(sha1Hex(Data("abc".utf8)) == "a9993e364706816aba3e25717850c26c9cd0d89d")
 }
+
+@Test(arguments: [("quarry-1a2b3c4d", true), ("../..", false), ("quarry-1a2b3c4d/../x", false), ("", false)])
+func `only real instance ids are accepted`(id: String, ok: Bool) {
+    #expect(Paths.isValidInstanceId(id) == ok)
+}
+
+@Test func `modpacks cannot overwrite instance metadata`() {
+    #expect(throws: QuarryError.self) { try Paths.safeDestination(base: base, path: "instance.json") }
+}
+
+@Test func `symlinks in a modpack are rejected`() throws {
+    let dir = FileManager.default.temporaryDirectory.appending(path: "quarry-test-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir.appending(path: "overrides"), withIntermediateDirectories: true)
+    try Paths.rejectSymlinks(in: dir)
+    try FileManager.default.createSymbolicLink(at: dir.appending(path: "overrides/mods"), withDestinationURL: URL(filePath: "/tmp"))
+    #expect(throws: QuarryError.self) { try Paths.rejectSymlinks(in: dir) }
+}

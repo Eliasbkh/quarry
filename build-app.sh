@@ -10,6 +10,7 @@ REPO=$(cat .update-repo 2>/dev/null || true) # „besitzer/quarry“ für den Up
 # shortcut: das macOS-27-SDK braucht für @State Xcodes SwiftUIMacros-Plugin; mit installiertem Xcode diese Zeile löschen.
 export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
 swift build -c release 2>&1 | grep -v "ld: warning" || true
+UPDATE_KEY=$(swift scripts/sign-update.swift pubkey 2>/dev/null)
 
 APP=build/Quarry.app
 rm -rf "$APP"
@@ -32,6 +33,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>QuarryUpdateRepo</key><string>$REPO</string>
+  <key>QuarryUpdateKey</key><string>$UPDATE_KEY</string>
 </dict></plist>
 EOF
 codesign --force --deep --sign - "$APP"

@@ -33,10 +33,23 @@ enum Paths {
     /// Lehnt absolute Pfade und „..“ ab, damit Modpacks nichts außerhalb der Instanz schreiben.
     static func safeDestination(base: URL, path: String) throws -> URL {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
-        guard !path.hasPrefix("/"), !path.isEmpty, !parts.contains(".."), !parts.contains("") else {
+        guard !path.hasPrefix("/"), !path.isEmpty, !parts.contains(".."), !parts.contains(""), path != "instance.json" else {
             throw QuarryError.unsafePath(path)
         }
         return base.appending(path: path)
+    }
+
+    static func isValidInstanceId(_ id: String) -> Bool {
+        id.wholeMatch(of: /quarry-[0-9a-f]{8}/) != nil
+    }
+
+    static func rejectSymlinks(in dir: URL) throws {
+        let items = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.isSymbolicLinkKey])
+        while let url = items?.nextObject() as? URL {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
+                throw QuarryError.unsafePath(url.lastPathComponent)
+            }
+        }
     }
 
     /// cdn.modrinth.com/data/<projektID>/versions/… → projektID
@@ -72,8 +85,10 @@ private let fm = FileManager.default
 
     func load() {
         let dirs = (try? fm.contentsOfDirectory(at: Paths.root, includingPropertiesForKeys: nil)) ?? []
-        instances = dirs.compactMap {
-            try? JSONDecoder().decode(Instance.self, from: Data(contentsOf: $0.appending(path: "instance.json")))
+        instances = dirs.compactMap { d -> Instance? in
+            guard let i = try? JSONDecoder().decode(Instance.self, from: Data(contentsOf: d.appending(path: "instance.json"))),
+                  Paths.isValidInstanceId(i.id), i.id == d.lastPathComponent else { return nil } // untergeschobene IDs wie „../..“ ignorieren
+            return i
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -295,6 +310,7 @@ private let fm = FileManager.default
                 start()
             }
         }
+        try Paths.rejectSymlinks(in: unpacked) // ein Symlink in overrides könnte sonst außerhalb der Instanz schreiben
         for folder in ["overrides", "client-overrides"] where fm.fileExists(atPath: unpacked.appending(path: folder).path) {
             try runTool("/usr/bin/ditto", [unpacked.appending(path: folder).path, base.path])
         }
