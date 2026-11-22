@@ -13,6 +13,8 @@ struct Instance: Codable, Identifiable, Hashable {
 /// Wird bei jeder neuen Instanz automatisch installiert (alles Fabric, Client-seitig).
 let macPerformancePack: [(slug: String, name: String, why: String)] = [
     ("sodium", "Sodium", "Neuer Renderer, meist 2–3× mehr FPS – wichtigster Mod auf dem Mac"),
+    ("iris", "Iris Shaders", "Shader (z. B. Complementary) mit Sodium-Tempo"),
+    ("moreculling", "MoreCulling", "Blendet verdeckte Blockflächen aus – extra FPS, v. a. mit Shadern"),
     ("lithium", "Lithium", "Schnellere Spiel-Logik (Ticks)"),
     ("ferrite-core", "FerriteCore", "Weniger RAM – wichtig bei 8/16 GB Unified Memory"),
     ("modernfix", "ModernFix", "Schnellerer Start, weniger RAM"),
