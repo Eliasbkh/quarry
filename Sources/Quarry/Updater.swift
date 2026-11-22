@@ -49,7 +49,11 @@ enum Updater {
         try runTool("/usr/bin/ditto", ["-x", "-k", zip.path, tmp.path])
         let newApp = tmp.appending(path: "Quarry.app")
         // Nur ein echtes, unbeschädigtes Quarry-Bundle einsetzen.
-        guard Bundle(url: newApp)?.bundleIdentifier == Bundle.main.bundleIdentifier else { throw QuarryError.badFile("Update-Paket") }
+        let newBundle = Bundle(url: newApp)
+        let newVersion = newBundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        // Kein Downgrade auf eine ältere (evtl. lückenhafte) signierte Version.
+        guard newBundle?.bundleIdentifier == Bundle.main.bundleIdentifier, newVersion == r.version,
+              isNewer(newVersion, than: current) else { throw QuarryError.badFile("Update-Paket") }
         try runTool("/usr/bin/codesign", ["--verify", "--deep", newApp.path])
 
         let target = Bundle.main.bundleURL.path

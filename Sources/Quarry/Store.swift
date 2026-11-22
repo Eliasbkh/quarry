@@ -33,7 +33,8 @@ enum Paths {
     /// Lehnt absolute Pfade und „..“ ab, damit Modpacks nichts außerhalb der Instanz schreiben.
     static func safeDestination(base: URL, path: String) throws -> URL {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
-        guard !path.hasPrefix("/"), !path.isEmpty, !parts.contains(".."), !parts.contains(""), path != "instance.json" else {
+        guard !path.hasPrefix("/"), !path.isEmpty, !parts.contains(".."), !parts.contains(""), !parts.contains("."),
+              path.lowercased() != "instance.json" else { // APFS ignoriert Groß/Klein
             throw QuarryError.unsafePath(path)
         }
         return base.appending(path: path)

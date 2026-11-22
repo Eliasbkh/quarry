@@ -4,7 +4,7 @@ import Testing
 
 let base = URL(filePath: "/tmp/inst")
 
-@Test(arguments: ["../evil.jar", "/etc/passwd", "mods/../../x", "mods//a.jar", ""])
+@Test(arguments: ["../evil.jar", "/etc/passwd", "mods/../../x", "mods//a.jar", "", "./instance.json", "Instance.JSON"])
 func `unsafe modpack paths are rejected`(path: String) {
     #expect(throws: QuarryError.self) { try Paths.safeDestination(base: base, path: path) }
 }
