@@ -12,6 +12,6 @@ echo "$NEW" > VERSION
 rm -f build/Quarry.zip
 ditto -c -k --keepParent build/Quarry.app build/Quarry.zip
 swift scripts/sign-update.swift sign build/Quarry.zip > build/Quarry.zip.sig
-git add -A && git commit -qm "Quarry $NEW" && git push -q
+git add -A; git diff --cached --quiet || git commit -qm "Quarry $NEW"; git push -q
 gh release create "v$NEW" build/Quarry.zip build/Quarry.zip.sig --repo "$REPO" --title "Quarry $NEW" --notes "$NOTES"
 echo "Veröffentlicht: https://github.com/$REPO/releases/tag/v$NEW"
