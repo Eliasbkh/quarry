@@ -24,7 +24,8 @@ enum Updater {
     /// nil = Quarry ist aktuell.
     static func latest() async throws -> Release? {
         guard let repo, !repo.isEmpty else { throw QuarryError.noUpdateServer }
-        let data = try await Modrinth.fetch(URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!)
+        // Ohne Cache: GitHub erlaubt 60 s Zwischenspeicher, sonst sieht „Nach Updates suchen“ neue Versionen nicht.
+        let data = try await Modrinth.fetch(URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!, fresh: true)
         let r = try Modrinth.decoder.decode(Release.self, from: data)
         return isNewer(r.tagName, than: current) ? r : nil
     }

@@ -94,8 +94,8 @@ enum Modrinth {
         return d
     }()
 
-    static func fetch(_ url: URL, body: Any? = nil) async throws -> Data {
-        var req = URLRequest(url: url)
+    static func fetch(_ url: URL, body: Any? = nil, fresh: Bool = false) async throws -> Data {
+        var req = URLRequest(url: url, cachePolicy: fresh ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
         req.setValue("Quarry/\(Updater.current) (macOS launcher)", forHTTPHeaderField: "User-Agent")
         if let body {
             req.httpMethod = "POST"
